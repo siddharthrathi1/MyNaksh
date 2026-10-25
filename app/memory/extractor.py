@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from app.core.errors import LLMError, LLMUnavailableError
 from app.core.models import ChatMessage, MemoryItem, Role
 from app.llm.base import LLMMessage, LLMProvider, LLMRequest
-from app.memory.gate import is_self_disclosure
+from app.memory.gate import answers_question, is_self_disclosure
 from app.memory.models import ExtractedMemory, ExtractionResult
 from app.memory.rules import RuleBasedExtractor
 from app.memory.timeframe import resolve_timeframe
@@ -29,7 +29,12 @@ logger = logging.getLogger(__name__)
 
 class Extractor(Protocol):
     async def extract(
-        self, message: str, now: datetime, existing: list[MemoryItem], history: list[ChatMessage]
+        self,
+        message: str,
+        now: datetime,
+        existing: list[MemoryItem],
+        history: list[ChatMessage],
+        memorable: bool | None = None,
     ) -> ExtractionResult: ...
 
 
@@ -133,9 +138,19 @@ class HybridExtractor:
         self._rules = rules
 
     async def extract(
-        self, message: str, now: datetime, existing: list[MemoryItem], history: list[ChatMessage]
+        self,
+        message: str,
+        now: datetime,
+        existing: list[MemoryItem],
+        history: list[ChatMessage],
+        memorable: bool | None = None,
     ) -> ExtractionResult:
-        if not is_self_disclosure(message):
+        """`memorable` is the LLM query analyzer's verdict; None means it didn't judge (rules mode
+        or analysis fell back), so the cheap heuristic gate decides instead."""
+        if memorable is None:
+            last_assistant = next((m.content for m in reversed(history) if m.role == Role.ASSISTANT), None)
+            memorable = is_self_disclosure(message) or answers_question(message, last_assistant)
+        if not memorable:
             return ExtractionResult(extractor="gate_skipped")
 
         if self._llm is not None:

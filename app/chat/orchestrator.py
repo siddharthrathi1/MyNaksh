@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 from app.brain.repository import BrainRepository
 from app.context.prompt import PromptBuilder
-from app.context.query import QueryAnalysis, QueryAnalyzer
+from app.context.query import HybridQueryAnalyzer, QueryAnalysis
 from app.context.selector import ContextSelector
 from app.core.clock import Clock
 from app.core.errors import GraphUnavailableError, LLMError, LLMUnavailableError
@@ -46,6 +46,7 @@ class MemoryJob:
     source_message_id: str | None
     history: list[ChatMessage]
     now: datetime
+    memorable: bool | None = None  # analyzer's verdict; None → extractor's own gate decides
 
 
 @dataclass
@@ -70,7 +71,7 @@ class ChatOrchestrator:
         repo: BrainRepository,
         profiles: ProfileService,
         short_term: ShortTermMemory,
-        analyzer: QueryAnalyzer,
+        analyzer: HybridQueryAnalyzer,
         selector: ContextSelector,
         prompts: PromptBuilder,
         llm: LLMProvider,
@@ -106,7 +107,7 @@ class ChatOrchestrator:
             degraded.append("memory_unavailable")
 
         # 2–3. Understand the query, select only the relevant context.
-        analysis = self._analyzer.analyze(message, history)
+        analysis = await self._analyzer.analyze(message, history)
         context = await self._selector.select(profile, analysis, history, now, graph_available=graph_ok)
         if context.degraded and graph_ok:
             degraded.append("memory_unavailable")
@@ -133,12 +134,14 @@ class ChatOrchestrator:
                 degraded.append("persistence_failed")
 
         logger.info(
-            "chat_turn user=%s session=%s intent=%s areas=%s context=%s degraded=%s total_ms=%.0f",
-            user_id, session_id, analysis.intent.value, [a.value for a in analysis.life_areas],
-            context.context_used, degraded, (time.perf_counter() - started) * 1000,
+            "chat_turn user=%s session=%s analyzer=%s intent=%s areas=%s memorable=%s context=%s "
+            "degraded=%s total_ms=%.0f",
+            user_id, session_id, analysis.analyzer, analysis.intent.value,
+            [a.value for a in analysis.life_areas], analysis.memorable, context.context_used, degraded,
+            (time.perf_counter() - started) * 1000,
         )
 
-        job = MemoryJob(user_id, message, user_msg.id, history, now) if graph_ok else None
+        job = MemoryJob(user_id, message, user_msg.id, history, now, analysis.memorable) if graph_ok else None
         return ChatResult(
             response=reply,
             user_id=user_id,
@@ -153,7 +156,7 @@ class ChatOrchestrator:
         """Step 7: extract and persist long-term memories. Never raises."""
         try:
             existing = await self._repo.query_memories(job.user_id, limit=EXISTING_MEMORY_LIMIT)
-            result = await self._extractor.extract(job.message, job.now, existing, job.history)
+            result = await self._extractor.extract(job.message, job.now, existing, job.history, job.memorable)
             if result.is_empty():
                 return []
             return await self._updater.apply(job.user_id, result, job.source_message_id, job.now)

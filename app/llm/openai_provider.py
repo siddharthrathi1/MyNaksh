@@ -12,9 +12,17 @@ DEFAULT_MODEL = "gpt-4o-mini"
 class OpenAIProvider(LLMProvider):
     name = "openai"
 
-    def __init__(self, api_key: str, model: str | None = None, timeout_s: float = 30.0):
+    def __init__(
+        self,
+        api_key: str,
+        model: str | None = None,
+        timeout_s: float = 30.0,
+        base_url: str | None = None,
+    ):
         # SDK retries disabled: ResilientLLM owns retry/fallback policy in one place.
-        self._client = AsyncOpenAI(api_key=api_key, timeout=timeout_s, max_retries=0)
+        self._client = AsyncOpenAI(
+            api_key=api_key, base_url=base_url, timeout=timeout_s, max_retries=0
+        )
         self.model = model or DEFAULT_MODEL
 
     async def generate(self, request: LLMRequest) -> LLMResponse:

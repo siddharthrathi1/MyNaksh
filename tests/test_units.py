@@ -9,7 +9,7 @@ from app.context.prompt import PromptBuilder
 from app.context.query import Intent, QueryAnalyzer
 from app.context.selector import SelectedContext, score_memory
 from app.core.models import ChatMessage, LifeArea, MemoryItem, MemoryKind, Role, UserProfile
-from app.memory.gate import is_self_disclosure
+from app.memory.gate import answers_question, is_self_disclosure
 from app.memory.models import Operation
 from app.memory.rules import RuleBasedExtractor
 from app.memory.timeframe import resolve_timeframe
@@ -66,6 +66,9 @@ def test_relative_timeframes_resolve_against_now(phrase, expected):
     [
         ("I'm planning to switch jobs next year.", True),
         ("My name is Rahul.", True),
+        ("DOB 15-08-1995, time 10:30, place Jaipur", True),
+        ("15 August 1995, 10:30 am, Jaipur", True),
+        ("born in Jaipur at 10:30 pm", True),
         ("What should I focus on for my career?", False),
         ("Why do you say that?", False),
         ("Thanks, that's helpful!", False),
@@ -74,6 +77,12 @@ def test_relative_timeframes_resolve_against_now(phrase, expected):
 )
 def test_memory_gate(text, expected):
     assert is_self_disclosure(text) is expected
+
+
+def test_memory_gate_accepts_answers_to_assistant_questions():
+    assert answers_question("Jaipur, Rajasthan", "Where were you born?")
+    assert not answers_question("Jaipur, Rajasthan", "Jaipur is a lovely city.")
+    assert not answers_question("Why?", "Where were you born?")
 
 
 def test_life_area_detection():
@@ -97,6 +106,10 @@ class TestQueryAnalyzer:
     def test_memory_recall(self):
         a = self.analyzer.analyze("What do you remember about my career goals?", [])
         assert a.intent == Intent.MEMORY_RECALL and a.life_areas == [LifeArea.CAREER]
+
+    @pytest.mark.parametrize("text", ["What is my birth details?", "what's my name", "Tell me my date of birth"])
+    def test_profile_recall(self, text):
+        assert self.analyzer.analyze(text, []).intent == Intent.MEMORY_RECALL
 
     def test_astrology_intent(self):
         assert self.analyzer.analyze("What does my zodiac sign say?", []).intent == Intent.ASTROLOGY

@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 30.0
     llm_max_attempts: int = 2  # per provider, before falling through to the fallback
     openai_api_key: str | None = None
+    # OpenAI-compatible server (vLLM, Ollama, LM Studio...). When set, an API key is optional.
+    openai_base_url: str | None = None
     anthropic_api_key: str | None = None
     anthropic_effort: Literal["low", "medium", "high"] = "low"  # chat replies are short
     anthropic_refusal_fallback: bool = True
@@ -35,6 +37,8 @@ class Settings(BaseSettings):
     # --- Memory & context ---
     # "auto" = LLM extraction with rule fallback, or rules only when the provider is fake.
     extraction_mode: Literal["auto", "llm", "rules"] = "auto"
+    # Turn analysis (intent, topics, "anything worth remembering?"): same auto/llm/rules semantics.
+    analysis_mode: Literal["auto", "llm", "rules"] = "auto"
     # "sync" returns memories_written in the response (demo/testing);
     # "background" moves extraction off the request path (lower latency, eventual consistency).
     memory_write_mode: Literal["sync", "background"] = "sync"
@@ -45,7 +49,7 @@ class Settings(BaseSettings):
     context_token_budget: int = 1500  # rough budget for profile + memories + history
 
     @field_validator(
-        "llm_model", "llm_fallback_provider", "llm_fallback_model", "openai_api_key", "anthropic_api_key",
+        "llm_model", "llm_fallback_provider", "llm_fallback_model", "openai_api_key", "openai_base_url", "anthropic_api_key",
         mode="before",
     )
     @classmethod

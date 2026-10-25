@@ -14,7 +14,7 @@ from app.brain.repository import BrainRepository
 from app.chat.orchestrator import ChatOrchestrator
 from app.config import Settings
 from app.context.prompt import PromptBuilder
-from app.context.query import QueryAnalyzer
+from app.context.query import HybridQueryAnalyzer, LLMQueryAnalyzer, QueryAnalyzer
 from app.context.selector import ContextSelector
 from app.core.clock import Clock, utc_now
 from app.llm.base import LLMProvider
@@ -59,13 +59,17 @@ class Container:
             settings.extraction_mode == "auto" and settings.llm_provider != "fake"
         )
         extractor = HybridExtractor(LLMExtractor(llm) if use_llm_extraction else None, RuleBasedExtractor())
+        use_llm_analysis = settings.analysis_mode == "llm" or (
+            settings.analysis_mode == "auto" and settings.llm_provider != "fake"
+        )
+        analyzer = HybridQueryAnalyzer(LLMQueryAnalyzer(llm) if use_llm_analysis else None, QueryAnalyzer())
 
         profiles = ProfileService(repo, clock)
         orchestrator = ChatOrchestrator(
             repo=repo,
             profiles=profiles,
             short_term=ShortTermMemory(repo, settings.short_term_turns * 2),
-            analyzer=QueryAnalyzer(),
+            analyzer=analyzer,
             selector=ContextSelector(
                 repo,
                 max_memories=settings.max_memories_in_context,

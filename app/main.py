@@ -3,7 +3,10 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
 
 from app.api.errors import register_error_handlers
 from app.api.routes import router
@@ -38,6 +41,11 @@ def create_app(container: Container | None = None) -> FastAPI:
     )
     register_error_handlers(app)
     app.include_router(router)
+
+    # Minimal chat UI, served same-origin so no CORS setup is needed.
+    @app.get("/", include_in_schema=False)
+    async def index():
+        return FileResponse(Path(__file__).parent / "web" / "index.html")
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):

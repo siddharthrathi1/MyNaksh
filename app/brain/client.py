@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from neo4j import AsyncGraphDatabase, AsyncManagedTransaction
+from neo4j import AsyncGraphDatabase, AsyncManagedTransaction, NotificationDisabledCategory
 from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
 
 from app.brain.schema import CONSTRAINTS, INDEXES, LIFE_AREAS, SEED_LIFE_AREAS
@@ -31,6 +31,9 @@ class GraphClient:
             auth=(settings.neo4j_user, settings.neo4j_password),
             max_connection_pool_size=settings.neo4j_pool_size,
             connection_acquisition_timeout=settings.neo4j_timeout_s,
+            # Memory reads match every relationship type up front; on a young graph some types
+            # don't exist yet and the server warns on each query. Expected, so silence it.
+            notifications_disabled_categories=[NotificationDisabledCategory.UNRECOGNIZED],
         )
 
     async def close(self) -> None:

@@ -196,3 +196,59 @@ def test_forget_memories(client, user_id):
     chat(client, user_id, "s1", RAHUL_INTRO)
     assert client.delete(f"/users/{user_id}/memories").json() == {"deleted": 1}
     assert _memories(client, user_id, include_inactive=True) == []
+
+
+# LLM turn analysis ------------------------------------------------------------------------
+def _analysis_responder(analysis: dict | str, extraction: dict | None = None):
+    def responder(req: LLMRequest) -> str:
+        if req.purpose == "analysis":
+            return analysis if isinstance(analysis, str) else json.dumps(analysis)
+        if req.purpose == "extraction":
+            return json.dumps(extraction or {"profile_updates": {}, "memories": []})
+        return "ok"
+
+    return responder
+
+
+def test_llm_analysis_lets_pronoun_free_birth_details_through(make_client, user_id):
+    """No 'I'/'my' in the message: the regex gate would skip it, the LLM analyzer must not."""
+    llm = FakeLLM(_analysis_responder(
+        {"intent": "disclosure", "life_areas": [], "is_follow_up": False, "is_memory_query": False, "memorable": True},
+        {"profile_updates": {"dob": "1995-08-15", "tob": "10:30", "birth_place": "Jaipur"}, "memories": []},
+    ))
+    client, _ = make_client(llm=llm, analysis_mode="llm", extraction_mode="llm")
+    body = chat(client, user_id, "s1", "15/08/1995, 10:30 am, Jaipur")
+
+    assert any(c.purpose == "extraction" for c in llm.calls)
+    profile = client.get(f"/users/{user_id}").json()
+    assert (profile["dob"], profile["tob"][:5], profile["birth_place"]) == ("1995-08-15", "10:30", "Jaipur")
+    assert body["query_analysis"]["intent"] == "disclosure"
+
+
+def test_llm_analysis_skips_extraction_when_nothing_memorable(make_client, user_id):
+    llm = FakeLLM(_analysis_responder(
+        {"intent": "general", "life_areas": [], "is_follow_up": False, "is_memory_query": False, "memorable": False}
+    ))
+    client, _ = make_client(llm=llm, analysis_mode="llm", extraction_mode="llm")
+    chat(client, user_id, "s1", "I think that's all for today, thanks!")  # first-person, but nothing durable
+
+    assert not any(c.purpose == "extraction" for c in llm.calls)
+
+
+def test_llm_analysis_recognises_profile_recall(make_client, user_id):
+    llm = FakeLLM(_analysis_responder(
+        {"intent": "memory_recall", "life_areas": [], "is_follow_up": False, "is_memory_query": False, "memorable": False}
+    ))
+    client, _ = make_client(llm=llm, analysis_mode="llm")
+    body = chat(client, user_id, "s1", "remind me of my birth stuff")
+
+    assert body["query_analysis"]["is_memory_query"] is True
+
+
+def test_bad_llm_analysis_output_falls_back_to_rules(make_client, user_id):
+    llm = FakeLLM(_analysis_responder("not json at all"))
+    client, _ = make_client(llm=llm, analysis_mode="llm")
+    body = chat(client, user_id, "s1", "What should I focus on for my career?")
+
+    assert body["query_analysis"]["life_areas"] == ["career"]  # rule analyzer took over
+    assert body["degraded"] is False
